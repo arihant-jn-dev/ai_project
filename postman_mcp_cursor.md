@@ -41,7 +41,55 @@ Postman is **not** replacing the Postman app with MCP; it is **another client** 
 
 ---
 
-## 4. What is Cursor’s role?
+## 4. Where does the Postman MCP server run? (Hosted vs local vs “the backend”)
+
+People often ask: **Is the MCP server a hosted URL we connect to, or is it “part of” the same Postman backend where all the APIs live?** Here is a precise split.
+
+### 4.1 It is not “the whole backend” as one box
+
+- Postman’s **platform HTTP APIs** (collections, workspaces, environments, mocks, etc.) are the **contract** that many clients use: the **Postman desktop/web app**, **scripts**, **CI**, and **the MCP server**.
+- The **Postman MCP server** is an **adapter**: on one side it speaks **MCP** (tools, schemas); on the other it issues **normal HTTPS calls** to those **same platform APIs** (with your credentials).
+- So MCP is **not** a separate mystery database sitting beside Postman — and it is **not** “every internal microservice” either. It is a **facade optimized for LLM tool calls** that **delegates** to the **public/platform API surface** Postman documents.
+
+### 4.2 Hosted (remote) vs local — where the MCP *process* runs
+
+Postman supports **more than one way** to run that adapter (names and URLs evolve; always prefer [Postman’s official MCP docs](https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/overview)):
+
+| Deployment | Idea | Typical use |
+|------------|------|-------------|
+| **Hosted / remote MCP** | Postman exposes an **MCP endpoint over HTTPS** (often described for regions such as US vs EU). **Cursor connects to that URL**; you do **not** run a local Node process. Auth is usually **OAuth and/or API key** per Postman’s setup guide. | Fast setup, no local install of the MCP package. |
+| **Local MCP server** | You run a process on **your machine** (e.g. via `npx` or Docker, as documented by Postman). Cursor talks to it via **stdio** or local HTTP. It still calls Postman’s **cloud** APIs over the internet. | Stricter network control, air-gapped-friendly patterns where applicable, or custom builds. |
+
+**Important:** In **both** cases, **business data** still lives in **Postman’s cloud** (unless you only use APIs against on-prem — uncommon for standard Postman SaaS). What changes is **where the MCP adapter process runs**: Postman’s edge vs your laptop.
+
+### 4.3 End-to-end picture (one diagram)
+
+```mermaid
+flowchart TB
+  subgraph Yours["Your side"]
+    Cursor[MCP client in Cursor]
+  end
+  subgraph MCPDeploy["Postman MCP adapter (pick one)"]
+    direction LR
+    R[Hosted MCP endpoint]
+    Loc[Local postman-mcp-server]
+  end
+  subgraph PC["Postman cloud"]
+    APIs[Platform Postman HTTP APIs]
+    Back[Backend services + storage]
+  end
+  Cursor -->|MCP over HTTPS or stdio| R
+  Cursor -->|MCP| Loc
+  R -->|HTTPS| APIs
+  Loc -->|HTTPS| APIs
+  APIs --> Back
+```
+
+**Summary:** You are **using Postman’s MCP server** in the sense of **their MCP implementation** — either **hosted** (you point Cursor at their MCP URL) or **local** (you run their server). Either way, that server is the **MCP-facing layer**; **Postman’s backend APIs + data** sit **behind** it, same as for other API clients.
+
+---
+
+## 5. What is Cursor’s role?
 
 | Role | Description |
 |------|-------------|
@@ -54,7 +102,7 @@ Without Cursor (or another MCP-capable host), you would still have Postman’s H
 
 ---
 
-## 5. Where does the LLM fit?
+## 6. Where does the LLM fit?
 
 ```mermaid
 flowchart LR
@@ -87,7 +135,7 @@ flowchart LR
 
 ---
 
-## 6. End-to-end architecture (layers)
+## 7. End-to-end architecture (layers)
 
 Think of it as a **stack**. MCP is **not** the last hop to “everything Postman can do”; it is the **last standardized hop from the assistant to whatever the MCP server implements**.
 
@@ -121,7 +169,7 @@ flowchart TB
 
 ---
 
-## 7. Connection flow: “How did we connect Cursor to Postman?”
+## 8. Connection flow: “How did we connect Cursor to Postman?”
 
 Exact UI paths change with Cursor versions, but the **logical** steps are:
 
@@ -152,7 +200,7 @@ sequenceDiagram
 
 ---
 
-## 8. Is MCP the “last point,” or is there more after it?
+## 9. Is MCP the “last point,” or is there more after it?
 
 | Question | Answer |
 |----------|--------|
@@ -164,7 +212,7 @@ So: **MCP is not the final layer of “all software”** — it is a **narrow, s
 
 ---
 
-## 9. Limitations (what this setup does *not* do)
+## 10. Limitations (what this setup does *not* do)
 
 These are useful to document for stakeholders so expectations stay realistic:
 
@@ -177,7 +225,7 @@ These are useful to document for stakeholders so expectations stay realistic:
 
 ---
 
-## 10. Mental model in one diagram
+## 11. Mental model in one diagram
 
 ```mermaid
 flowchart TB
@@ -185,21 +233,27 @@ flowchart TB
     Cursor["Cursor IDE"]
     LLM2["LLM"]
     Client["MCP client"]
-    ServerProc["Postman MCP server process"]
-    Cursor --> LLM2 --> Client --> ServerProc
+  end
+  subgraph "MCP server location (either)"
+    ServerProc["Local MCP process"]
+    Hosted["Hosted MCP endpoint"]
   end
   subgraph "Network"
-    Internet["HTTPS"]
+    Internet["HTTPS to Postman APIs"]
   end
   subgraph "Postman"
     Cloud["Postman API + auth + data"]
   end
+  Cursor --> LLM2 --> Client
+  Client --> ServerProc
+  Client --> Hosted
   ServerProc --> Internet --> Cloud
+  Hosted --> Internet --> Cloud
 ```
 
 ---
 
-## 11. Glossary
+## 12. Glossary
 
 | Term | Short definition |
 |------|------------------|
@@ -211,11 +265,12 @@ flowchart TB
 
 ---
 
-## 12. Related reading
+## 13. Related reading
 
 - **Model Context Protocol** — Official specification and ecosystem (search for “Model Context Protocol documentation”).
 - **Cursor MCP docs** — How to configure MCP servers in Cursor (settings differ by release; prefer Cursor’s own docs for the latest UI).
+- **Postman MCP server (official)** — [Overview](https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/overview) — hosted vs local, authentication, and current endpoints.
 
 ---
 
-*This doc was written for internal/architecture explanation. Update the “Connection flow” section if your team uses a specific auth method or hosted MCP endpoint.*
+*This doc was written for internal/architecture explanation. Update §8 if your team uses a specific auth method, **hosted** MCP URL (region), or **local** `npx`/Docker command.*
